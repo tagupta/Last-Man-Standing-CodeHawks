@@ -89,8 +89,8 @@ Tokens:
 First, clone the project repository and install dependencies.
 
 ```bash
-git clone <YOUR_GITHUB_REPO_URL_HERE>
-cd <YOUR_PROJECT_DIRECTORY_NAME>
+git clone https://github.com/CodeHawks-Contests/2025-07-last-man-standing.git
+cd 2025-07-last-man-standing
 forge install
 forge build
 ```
