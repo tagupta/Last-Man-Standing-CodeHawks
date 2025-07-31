@@ -91,7 +91,8 @@ First, clone the project repository and install dependencies.
 ```bash
 git clone https://github.com/CodeHawks-Contests/2025-07-last-man-standing.git
 cd 2025-07-last-man-standing
-forge install
+forge install OpenZeppelin/openzeppelin-contracts
+forge install foundry-rs/forge-std
 forge build
 ```
 
