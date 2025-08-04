@@ -17,8 +17,10 @@ contract Game is Ownable {
 
     // Game Parameters (Configurable by Owner)
     uint256 public initialClaimFee; // The starting fee for a new game round
+    //@report-written feeIncreasePercentage, platformFeePercentage can be defined as uint8 to save one storage slot
     uint256 public feeIncreasePercentage; // Percentage by which the claimFee increases after each successful claim (e.g., 10 for 10%)
     uint256 public platformFeePercentage; // Percentage of the claimFee that goes to the contract owner (deployer)
+    //@report-written declare this as immutable variable
     uint256 public initialGracePeriod; // The grace period set at the start of a new game round
 
     // Payouts and Balances
@@ -84,6 +86,7 @@ contract Game is Ownable {
      * @param newRound The number of the new game round.
      * @param timestamp The block timestamp when the game was reset.
      */
+    //@report-written no indexed variable
     event GameReset(uint256 newRound, uint256 timestamp);
 
     /**
@@ -185,6 +188,7 @@ contract Game is Ownable {
      */
     function claimThrone() external payable gameNotEnded nonReentrant {
         require(msg.value >= claimFee, "Game: Insufficient ETH sent to claim the throne.");
+        //@report-written Critical can never be called as it expects msg.sender to be address 0, new players are completely locked out
         require(msg.sender == currentKing, "Game: You are already the king. No need to re-claim.");
 
         uint256 sentAmount = msg.value;
@@ -228,6 +232,7 @@ contract Game is Ownable {
      * The currentKing at the time the grace period expires becomes the winner.
      * The pot is then made available for the winner to withdraw.
      */
+    //@report-written attack to fron-run this transaction with claimThrone() and let this transaction go later - griefing / delay attack
     function declareWinner() external gameNotEnded {
         require(currentKing != address(0), "Game: No one has claimed the throne yet.");
         require(
@@ -247,6 +252,7 @@ contract Game is Ownable {
      * @dev Allows the declared winner to withdraw their prize.
      * Uses a secure withdraw pattern with a manual reentrancy guard.
      */
+    //@report-written not following CEI
     function withdrawWinnings() external nonReentrant {
         uint256 amount = pendingWinnings[msg.sender];
         require(amount > 0, "Game: No winnings to withdraw.");
@@ -334,6 +340,7 @@ contract Game is Ownable {
      * @dev Returns the time remaining until the grace period expires and a winner can be declared.
      * Returns 0 if the grace period has already expired or the game has ended.
      */
+    //@report-written not used inside the contract - declare this as external
     function getRemainingTime() public view returns (uint256) {
         if (gameEnded) {
             return 0; // Game has ended, no remaining time
@@ -348,6 +355,7 @@ contract Game is Ownable {
     /**
      * @dev Returns the current balance of the contract (should match the pot plus platform fees unless payouts are pending).
      */
+    //@report-written declare this as external function
     function getContractBalance() public view returns (uint256) {
         return address(this).balance;
     }
