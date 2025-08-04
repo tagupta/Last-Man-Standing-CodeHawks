@@ -1,3 +1,176 @@
+---
+title: Game Protocol Audit Report
+author: Tanu Gupta
+date: August 4, 2025
+header-includes:
+  - \usepackage{titling}
+  - \usepackage{graphicx}
+---
+
+\begin{titlepage}
+\centering
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.5\textwidth]{logo.pdf}
+\end{figure}
+\vspace{2cm}
+{\Huge\bfseries Last Man Standing Game Audit Report\par}
+\vspace{1cm}
+{\Large Version 1.0\par}
+\vspace{2cm}
+{\Large\itshape Tanu Gupta\par}
+\vfill
+{\large \today\par}
+\end{titlepage}
+
+\maketitle
+
+<!-- Your report starts here! -->
+
+Prepared by: [Tanu Gupta](https://github.com/tagupta)
+
+Lead Security Researcher:
+
+- Tanu Gupta
+
+# Table of Contents
+
+- [Table of Contents](#table-of-contents)
+- [Protocol Summary](#protocol-summary)
+- [Disclaimer](#disclaimer)
+- [Risk Classification](#risk-classification)
+- [Audit Details](#audit-details)
+  - [Scope](#scope)
+  - [Roles](#roles)
+    - [Owner (Deployer)](#owner-deployer)
+    - [King (Current King)](#king-current-king)
+    - [Players (Claimants)](#players-claimants)
+    - [Anyone (Declarer)](#anyone-declarer)
+- [Executive Summary](#executive-summary)
+  - [Issues found](#issues-found)
+- [Findings](#findings)
+  - [High](#high)
+    - [\[H-1\] Critical Logic Error in `Game::claimThrone()` renders entire contract unusable and permanently locks all funds](#h-1-critical-logic-error-in-gameclaimthrone-renders-entire-contract-unusable-and-permanently-locks-all-funds)
+  - [Medium](#medium)
+    - [\[M-1\] MEV Front-Running Attack Enables Griefing and Potential Theft Through Grace Period Manipulation by superseding `declareWinner` with `claimThrone`](#m-1-mev-front-running-attack-enables-griefing-and-potential-theft-through-grace-period-manipulation-by-superseding-declarewinner-with-claimthrone)
+  - [Low](#low)
+    - [\[L-1\] No index variable defined for important event `Game::GameReset`](#l-1-no-index-variable-defined-for-important-event-gamegamereset)
+    - [\[L-2\] CEI Pattern Violation in withdrawWinnings()](#l-2-cei-pattern-violation-in-withdrawwinnings)
+  - [Informational](#informational)
+    - [\[I-1\] `Game::initialGracePeriod` should be declared as immutable](#i-1-gameinitialgraceperiod-should-be-declared-as-immutable)
+  - [Gas](#gas)
+    - [\[G-1\] `feeIncreasePercentage` and `platformFeePercentage` percentage variables should use `uint8` instead of `uint256`](#g-1-feeincreasepercentage-and-platformfeepercentage-percentage-variables-should-use-uint8-instead-of-uint256)
+    - [\[G-2\] `getRemainingTime` and `getContractBalance` functions should be declared as external](#g-2-getremainingtime-and-getcontractbalance-functions-should-be-declared-as-external)
+
+# Protocol Summary
+
+The Last Man Standing Game is a decentralized "King of the Hill" style game implemented as a Solidity smart contract on the Ethereum Virtual Machine (EVM). It creates a competitive environment where players vie for the title of "King" by paying an increasing fee. The game's core mechanic revolves around a grace period: if no new player claims the throne before this period expires, the current King wins the entire accumulated prize pot.
+
+# Disclaimer
+
+The team makes all effort to find as many vulnerabilities in the code in the given time period, but holds no responsibilities for the findings provided in this document. A security audit by the team is not an endorsement of the underlying business or product. The audit was time-boxed and the review of the code was solely on the security aspects of the Solidity implementation of the contracts.
+
+# Risk Classification
+
+|            |        | Impact |        |     |
+| ---------- | ------ | ------ | ------ | --- |
+|            |        | High   | Medium | Low |
+|            | High   | H      | H/M    | M   |
+| Likelihood | Medium | H/M    | M      | M/L |
+|            | Low    | M      | M/L    | L   |
+
+We use the [CodeHawks](https://docs.codehawks.com/hawks-auditors/how-to-evaluate-a-finding-severity) severity matrix to determine severity. See the documentation for more details.
+
+# Audit Details
+
+The findings described in this document correspond the following repository [Last Man Standing](https://github.com/CodeHawks-Contests/2025-07-last-man-standing)
+
+## Scope
+
+```bash
+src/
+  - Game.sol
+```
+
+## Roles
+
+This protocol includes the following roles:
+
+### Owner (Deployer)
+
+**Powers:**
+
+- Deploys the `Game` contract.
+- Can update game parameters: `gracePeriod`, `initialClaimFee`, `feeIncreasePercentage`, `platformFeePercentage`.
+- Can `resetGame()` to start a new round after a winner has been declared.
+- Can `withdrawPlatformFees()` accumulated from claims.
+
+**Limitations:**
+
+- Cannot claim the throne if they are already the current king.
+- Cannot declare a winner before the grace period expires.
+- Cannot reset the game if a round is still active.
+
+### King (Current King)
+
+**Powers:**
+
+- The last player to successfully `claimThrone()`.
+- Receives a small payout from the next player's `claimFee` (if applicable).
+- Wins the entire `pot` if no one claims the throne before the `gracePeriod` expires.
+- Can `withdrawWinnings()` once declared a winner.
+
+**Limitations:**
+
+- Must pay the current `claimFee` to become king.
+- Cannot claim the throne if they are already the current king.
+- Their reign is temporary and can be overthrown by any other player.
+
+### Players (Claimants)
+
+**Powers:**
+
+- Can `claimThrone()` by sending the required `claimFee`.
+- Can become the `currentKing`.
+- Can potentially win the `pot` if they are the last king when the grace period expires.
+
+**Limitations:**
+
+- Must send sufficient ETH to match or exceed the `claimFee`.
+- Cannot claim if the game has ended.
+- Cannot claim if they are already the current king.
+
+### Anyone (Declarer)
+
+**Powers:**
+
+- Can call `declareWinner()` once the `gracePeriod` has expired.
+
+**Limitations:**
+
+- Cannot declare a winner if the grace period has not expired.
+- Cannot declare a winner if no one has ever claimed the throne.
+- Cannot declare a winner if the game has already ended.
+
+# Executive Summary
+
+Vulnerabilities have been reported using the foundry framework.
+
+## Issues found
+
+| Severity | Number of issues found |
+| -------- | ---------------------- |
+| High     | 1                      |
+| Medium   | 1                      |
+| Low      | 2                      |
+| Info     | 1                      |
+| Gas      | 2                      |
+| Total    | 7                      |
+
+# Findings
+
+## High
+
 ### [H-1] Critical Logic Error in `Game::claimThrone()` renders entire contract unusable and permanently locks all funds
 
 **Description** The `Game::claimThrone()` function contains a fatal logic error in its access control check.
@@ -47,6 +220,8 @@ function test_claim_throne() external {
 -        require(msg.sender == currentKing, "Game: You are already the king. No need to re-claim.");
 +        require(msg.sender != currentKing, "Game: You are already the king. No need to re-claim.");
 ```
+
+## Medium
 
 ### [M-1] MEV Front-Running Attack Enables Griefing and Potential Theft Through Grace Period Manipulation by superseding `declareWinner` with `claimThrone`
 
@@ -142,6 +317,8 @@ function claimThrone() external payable gameNotEnded nonReentrant {
 
 ```
 
+## Low
+
 ### [L-1] No index variable defined for important event `Game::GameReset`
 
 **Description** The `GameReset` event lacks **indexed** parameters, which significantly reduces its utility for off-chain applications and monitoring systems. Currently, the event is defined as:
@@ -197,6 +374,8 @@ function withdrawWinnings() external nonReentrant {
 
 ```
 
+## Informational
+
 ### [I-1] `Game::initialGracePeriod` should be declared as immutable
 
 **Description** The `Game::initialGracePeriod` is only assigned once during contract deployment in the `constructor` and is never modified afterward.
@@ -216,9 +395,11 @@ uint256 public initialGracePeriod;
 +        uint256 public immutable i_initialGracePeriod;
 ```
 
+## Gas
+
 ### [G-1] `feeIncreasePercentage` and `platformFeePercentage` percentage variables should use `uint8` instead of `uint256`
 
-**Description** The contract uses `uint256` for percentage values that are expected to be `≤ 100`. Both `feeIncreasePercentage` and `platformFeePercentage` represent percentage values that realistically will never exceed 100 **(representing 0-100%)**. Using `uint256` (32 bytes) for values that can be stored in `uint8` (1 byte) wastes storage slots and increases gas costs.
+**Description** The contract uses `uint256` for percentage values that are expected to be `<= 100`. Both `feeIncreasePercentage` and `platformFeePercentage` represent percentage values that realistically will never exceed 100 **(representing 0-100%)**. Using `uint256` (32 bytes) for values that can be stored in `uint8` (1 byte) wastes storage slots and increases gas costs.
 
 ```js
 uint256 public feeIncreasePercentage; // Expected ≤ 100, could be uint8
